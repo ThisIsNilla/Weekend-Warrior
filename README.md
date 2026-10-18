@@ -1,4 +1,4 @@
-# Weekend Outing Triage
+# Weekend Warrior: What's Going On This Weekend?
 
 Mobile-first decision engine for parents to quickly triage, filter, and discover outdoor and indoor outings with toddlers and young children.
 
