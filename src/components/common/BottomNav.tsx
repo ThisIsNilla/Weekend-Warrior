@@ -1,7 +1,7 @@
 import React from 'react';
 import { Compass, ListFilter, MapPinned } from 'lucide-react';
 
-export type AppTab = 'triage' | 'nearby' | 'manage';
+export type AppTab = 'triage' | 'nearby' | 'manage' | 'spots';
 
 export interface BottomNavProps {
   activeTab: AppTab;
@@ -10,7 +10,7 @@ export interface BottomNavProps {
 }
 
 const NAV_ITEMS: ReadonlyArray<{
-  id: AppTab;
+  id: Exclude<AppTab, 'spots'>;
   label: string;
   Icon: React.ComponentType<{ className?: string }>;
 }> = [
@@ -33,7 +33,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <div className="w-full max-w-md bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 pointer-events-auto">
         <div className="grid grid-cols-3 gap-1">
           {NAV_ITEMS.map(({ id, label, Icon }) => {
-            const isActive = activeTab === id;
+            const isActive =
+              activeTab === id || (id === 'manage' && activeTab === 'spots');
             return (
               <button
                 key={id}
