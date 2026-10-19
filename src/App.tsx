@@ -1,89 +1,251 @@
-import React from 'react';
-import { Compass, MapPin, Sparkles, ShieldCheck, SunMedium } from 'lucide-react';
-import type { TriageCountOption, Spot, WeatherState } from './types';
+import React, { useMemo, useState } from 'react';
+import { RotateCcw, Search, Trash2 } from 'lucide-react';
+import type { TriageCountOption, TriageFilter } from './types';
+import { useGeolocation, useSpots, useWeather } from './hooks';
+import { runTriage } from './utils/triageAlgorithm';
+import {
+  BottomNav,
+  FallbackBanner,
+  Header,
+  QuickFilterChips,
+  TriageButton,
+  TriageFilterModal,
+  TriageModeSelector,
+  TriageResults,
+  WeatherBanner,
+} from './components';
+import type { AppTab } from './components';
+
+const DEFAULT_FILTER: TriageFilter = {
+  countOption: 5,
+};
 
 const App: React.FC = () => {
-  const defaultCount: TriageCountOption = 5;
+  const {
+    coords,
+    loading: geoLoading,
+    isFallback: isLocationFallback,
+    errorMessage: locationError,
+    refreshLocation,
+  } = useGeolocation();
 
-  const mockWeather: WeatherState = {
-    temperatureF: 72,
-    condition: 'clear',
-    isRaining: false,
-    isSnowing: false,
-    isExtremeCold: false,
-    isExtremeHeat: false,
+  const {
+    weather,
+    loading: weatherLoading,
+    isFallback: isWeatherFallback,
+    includeOutdoorAnyway,
+    setIncludeOutdoorAnyway,
+    refreshWeather,
+  } = useWeather(coords);
+
+  const { spots, deleteSpot, resetSpots } = useSpots();
+
+  const [activeTab, setActiveTab] = useState<AppTab>('triage');
+  const [filter, setFilter] = useState<TriageFilter>(DEFAULT_FILTER);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState<boolean>(false);
+  const [hasTriaged, setHasTriaged] = useState<boolean>(false);
+  const [rerollCounter, setRerollCounter] = useState<number>(0);
+
+  const countOption: TriageCountOption =
+    activeTab === 'nearby' ? 'all' : (filter.countOption ?? 5);
+
+  const triageOutput = useMemo(() => {
+    // Reference rerollCounter so clicking Reroll/Shuffle recomputes randomized stratification
+    const shouldShuffle = rerollCounter > 0 && countOption !== 'all';
+    return runTriage(
+      spots,
+      {
+        ...filter,
+        userLocation: coords,
+        countOption,
+      },
+      weather,
+      {
+        includeOutdoorAnyway,
+        shuffle: shouldShuffle,
+      },
+    );
+  }, [spots, filter, coords, countOption, weather, includeOutdoorAnyway, rerollCounter]);
+
+  const handleRefreshAll = async () => {
+    const geoResult = await refreshLocation();
+    await refreshWeather(true, geoResult.coords);
   };
 
-  const sampleSpot: Partial<Spot> = {
-    id: 'spot-sample-1',
-    name: 'Pine Hill Adventure Park',
-    category: 'playground',
-    spotType: 'outdoor',
-    energyLevel: 'high',
-    costLevel: 'free',
-    isToddlerFriendly: true,
-    isYoungKidFriendly: true,
+  const handleSelectCount = (nextCount: TriageCountOption) => {
+    setFilter((prev) => ({
+      ...prev,
+      countOption: nextCount,
+    }));
+  };
+
+  const handleTriggerTriage = () => {
+    setHasTriaged(true);
+    setRerollCounter((prev) => prev + 1);
+  };
+
+  const handleResetFilters = () => {
+    setFilter({
+      countOption: filter.countOption ?? 5,
+    });
+    setIncludeOutdoorAnyway(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 pt-safe pb-safe px-safe flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
-        <header className="flex items-center justify-between pb-4 border-b border-slate-700">
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-teal-400/10 text-teal-400">
-              <Compass className="w-6 h-6" />
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex justify-center overflow-x-hidden">
+      <div
+        data-testid="mobile-shell"
+        className="w-full max-w-md min-h-screen bg-slate-900 text-slate-100 pt-safe pb-24 px-safe flex flex-col border-x border-slate-800/80 shadow-2xl overflow-x-hidden"
+      >
+        <Header
+          coords={coords}
+          isLocationFallback={isLocationFallback}
+          weather={weather}
+          isRefreshing={geoLoading || weatherLoading}
+          onRefresh={handleRefreshAll}
+        />
+
+        <FallbackBanner
+          isLocationFallback={isLocationFallback}
+          isWeatherFallback={isWeatherFallback}
+          locationErrorMessage={locationError}
+          onRetry={handleRefreshAll}
+        />
+
+        <WeatherBanner
+          weather={weather}
+          includeOutdoorAnyway={includeOutdoorAnyway}
+          onToggleIncludeOutdoor={setIncludeOutdoorAnyway}
+        />
+
+        <main className="flex-1 px-4 pt-4 space-y-4">
+          {activeTab === 'triage' && (
+            <>
+              <TriageModeSelector
+                selectedCount={filter.countOption ?? 5}
+                onSelectCount={handleSelectCount}
+              />
+
+              <QuickFilterChips
+                filter={filter}
+                onChangeFilter={setFilter}
+                onOpenModal={() => setIsFilterModalOpen(true)}
+              />
+
+              <TriageButton
+                hasTriaged={hasTriaged}
+                countOption={filter.countOption ?? 5}
+                onClick={handleTriggerTriage}
+              />
+
+              <TriageResults
+                candidates={triageOutput.candidates}
+                totalCandidates={triageOutput.totalCandidates}
+                countOption={filter.countOption ?? 5}
+                onReroll={handleTriggerTriage}
+                onResetFilters={handleResetFilters}
+              />
+            </>
+          )}
+
+          {activeTab === 'nearby' && (
+            <div className="space-y-3" data-testid="nearby-feed-view">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="search"
+                  value={filter.searchQuery ?? ''}
+                  onChange={(e) =>
+                    setFilter((prev) => ({
+                      ...prev,
+                      searchQuery: e.target.value,
+                    }))
+                  }
+                  placeholder="Search nearby parks, museums, or towns..."
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-teal-400"
+                />
+              </div>
+
+              <QuickFilterChips
+                filter={filter}
+                onChangeFilter={setFilter}
+                onOpenModal={() => setIsFilterModalOpen(true)}
+              />
+
+              <TriageResults
+                candidates={triageOutput.candidates}
+                totalCandidates={triageOutput.totalCandidates}
+                countOption="all"
+                onResetFilters={handleResetFilters}
+              />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-white">
-                Weekend Outing Triage
-              </h1>
-              <p className="text-xs text-slate-400">Mobile-First Parent Engine</p>
+          )}
+
+          {activeTab === 'manage' && (
+            <div className="space-y-3" data-testid="manage-spots-view">
+              <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-white">
+                    Saved Capital Region Spots
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    {spots.length} family outing locations in local storage
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => resetSpots()}
+                  data-testid="reset-seed-spots-button"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-amber-400 text-xs font-semibold transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Seeds</span>
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {spots.map((spot) => (
+                  <div
+                    key={spot.id}
+                    className="bg-slate-800/90 border border-slate-700 rounded-xl p-3 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">
+                        {spot.name}
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {spot.city ? `${spot.city} • ` : ''}
+                        {spot.category.replace(/_/g, ' ')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteSpot(spot.id)}
+                      aria-label={`Delete ${spot.name}`}
+                      className="p-1.5 rounded-lg bg-slate-700/70 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition-colors shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-          <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/30">
-            Phase 1
-          </span>
-        </header>
+          )}
+        </main>
 
-        <section className="space-y-3">
-          <div className="flex items-center justify-between text-sm text-slate-300">
-            <span className="flex items-center gap-2">
-              <SunMedium className="w-4 h-4 text-teal-400" />
-              Weather Sync
-            </span>
-            <span className="text-slate-400 font-medium">
-              {mockWeather.temperatureF}°F ({mockWeather.condition})
-            </span>
-          </div>
+        <TriageFilterModal
+          isOpen={isFilterModalOpen}
+          filter={filter}
+          onChangeFilter={setFilter}
+          onResetFilters={handleResetFilters}
+          onClose={() => setIsFilterModalOpen(false)}
+        />
 
-          <div className="flex items-center justify-between text-sm text-slate-300">
-            <span className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-teal-400" />
-              Triage Slots
-            </span>
-            <span className="text-slate-400 font-medium">
-              Top {defaultCount} Outings
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between text-sm text-slate-300">
-            <span className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-teal-400" />
-              Spot Preview
-            </span>
-            <span className="text-slate-400 font-medium">
-              {sampleSpot.name}
-            </span>
-          </div>
-        </section>
-
-        <footer className="pt-4 border-t border-slate-700 flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-1.5 text-teal-400">
-            <ShieldCheck className="w-4 h-4" />
-            Capacitor & Tailwind Ready
-          </span>
-          <span>v0.1.0</span>
-        </footer>
+        <BottomNav
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          totalSpotsCount={spots.length}
+        />
       </div>
     </div>
   );
